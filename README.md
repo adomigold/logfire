@@ -1,7 +1,3 @@
-Perfect — since your tool is now able to parse Apache and Nginx logs, search, and output in multiple formats including JSON, here's a `README.md` for your project **Logfire**:
-
----
-
 ````markdown
 # 🔥 Logfire
 
