@@ -99,7 +99,7 @@ gcc -o logfire src/logfire.c src/parser.c src/cli.c -Wall
 ## 👨‍💻 Author
 
 Made with ❤️ by Adolph Mapunda
-[GitHub](https://github.com/adomigold) • [LinkedIn](https://www.linkedin.com/in/adolph-Mapunda-106474178/)
+[GitHub](https://github.com/adomigold) • [LinkedIn](https://www.linkedin.com/in/adolph-gasper-106474178)
 
 ---
 
