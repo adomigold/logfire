@@ -1,0 +1,10 @@
+output/
+.vscode/
+sample_logs/
+
+// binaries
+*.exe
+
+logs.json
+TODO.txt
+run.bat
