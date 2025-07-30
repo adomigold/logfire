@@ -27,7 +27,9 @@
 char *read_line_dyn(FILE *fp)
 {
     size_t cap = 4096, len = 0;
+
     char *buf = (char *)malloc(cap);
+
     if (!buf)
         return NULL;
 
@@ -42,12 +44,15 @@ char *read_line_dyn(FILE *fp)
             }
             break;
         }
+
         len += strlen(buf + len);
+
         if (len && buf[len - 1] == '\n')
         {
             buf[len - 1] = '\0';
             break;
         }
+
         if (cap - len < 2)
         {
             cap *= 2;
@@ -81,6 +86,26 @@ void process_stream(FILE *in, const char *label, const CLIOptions *opt, FILE *ou
     long long total = 0, parsed = 0, failed = 0;
     int opened_json = 0, first_json = 1;
 
+    /* ---- Parse field-based query once (if provided) ---- */
+    Query q;
+    int use_q = 0;
+    char qerr[128] = {0};
+
+    if (opt->query && *opt->query)
+    {
+        if (!query_parse(opt->query, opt->case_insensitive, &q, qerr, sizeof(qerr)))
+        {
+            fprintf(stderr, "query parse error: %s\n", qerr);
+            // You can choose to return early, or just fall back to keyword search:
+            // return;
+        }
+        else
+        {
+            use_q = 1;
+        }
+    }
+
+    /* JSON array opening (batch mode) */
     if (opt->format == FORMAT_JSON)
     {
         fprintf(out, "[");
@@ -99,8 +124,20 @@ void process_stream(FILE *in, const char *label, const CLIOptions *opt, FILE *ou
 
         if (parse_apache_or_nginx(line, &e, perr, sizeof(perr)))
         {
-            int ok = (!opt->searchTerm || !*opt->searchTerm) ? 1
-                                                             : matches(&e, opt->searchTerm, opt->case_insensitive);
+            int ok = 1;
+
+            if (use_q)
+            {
+                ok = query_match(&e, &q);
+            }
+            else if (opt->query && *opt->query)
+            {
+                ok = matches(&e, opt->query, opt->case_insensitive);
+            }
+            else
+            {
+                ok = 1; // no filters -> print all
+            }
 
             if (ok)
             {
@@ -108,8 +145,7 @@ void process_stream(FILE *in, const char *label, const CLIOptions *opt, FILE *ou
                 {
                     if (!first_json)
                         fprintf(out, ",");
-
-                    printLogJSON(&e, out);
+                    printLogJSON(&e, out); // your signature: (LogEntry*, FILE*)
                     first_json = 0;
                 }
                 else if (opt->format == FORMAT_CSV)
@@ -130,7 +166,8 @@ void process_stream(FILE *in, const char *label, const CLIOptions *opt, FILE *ou
             failed++;
             if (opt->strict)
             {
-                fprintf(stderr, "[warn] parse failed (%s): %s\n", label ? label : "-", perr[0] ? perr : "unknown");
+                fprintf(stderr, "[warn] parse failed (%s): %s\n",
+                        label ? label : "-", perr[0] ? perr : "unknown");
                 fprintf(stderr, "  >> %s\n", line);
             }
         }

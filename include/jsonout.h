@@ -1,3 +1,7 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * Copyright (c) 2025 Adolph Mapunda
+ */
 #ifndef JSONOUT_H
 #define JSONOUT_H
 #include <stdio.h>

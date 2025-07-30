@@ -1,3 +1,7 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * Copyright (c) 2025 Adolph Mapunda
+ */
 #ifndef CLI_H
 #define CLI_H
 
@@ -12,13 +16,16 @@ typedef enum
 
 typedef struct
 {
-    const char **inputs; // array of input paths; we use "-" for stdin
+    const char **inputs;
     int input_count;
-    const char *searchTerm; // may be NULL or ""
-    OutputFormat format;    // FORMAT_TEXT / FORMAT_JSON / FORMAT_CSV
-    const char *outputFile; // nullable
-    int strict;             // print parse errors/unknown lines to stderr
-    int case_insensitive;   // case-insensitive search
+    const char *searchTerm;
+    const char *query;
+    OutputFormat format;
+    const char *outputFile;
+    int strict;
+    int case_insensitive;
+    int tail;
+    int from_start;
 } CLIOptions;
 
 CLIOptions parseCLI(int argc, char *argv[]);

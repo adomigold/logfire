@@ -1,16 +1,15 @@
 /*
  * SPDX-License-Identifier: AGPL-3.0-or-later
- * Copyright (c) 2025 Adolph Mapunda and contributors
+ * Copyright (c) 2025 Adolph Mapunda
  */
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
-#include "logfire.h"
-#include "parser.h"
-#include "formatter.h"
+#include <string.h>
 #include "cli.h"
 
-FILE *out = NULL;
+// Prototypes from your other modules
+void process_stream(FILE *in, const char *label, const CLIOptions *opt, FILE *out);
+void tail_file(const char *path, int from_start, const CLIOptions *opt, FILE *out);
 
 int main(int argc, char *argv[])
 {
@@ -26,8 +25,36 @@ int main(int argc, char *argv[])
             return 1;
         }
     }
+    
+    if (opts.tail)
+    {
+        
+        if (opts.input_count != 1)
+        {
+            fprintf(stderr, "Error: --tail expects exactly one --log FILE (not multiple, not stdin).\n");
+            if (out != stdout)
+                fclose(out);
+            free((void *)opts.inputs);
+            return 1;
+        }
+        const char *path = opts.inputs[0];
+        if (strcmp(path, "-") == 0)
+        {
+            fprintf(stderr, "Error: --tail cannot follow stdin. Provide a file path with --log.\n");
+            if (out != stdout)
+                fclose(out);
+            free((void *)opts.inputs);
+            return 1;
+        }
+        // Tail mode: stream indefinitely; recommend NDJSON for JSON output in tail_file
+        tail_file(path, opts.from_start, &opts, out);
 
-    // No inputs? parseCLI already added "-" (stdin)
+        if (out != stdout)
+            fclose(out);
+        free((void *)opts.inputs);
+        return 0;
+    }
+
     for (int i = 0; i < opts.input_count; i++)
     {
         const char *path = opts.inputs[i];
@@ -50,7 +77,7 @@ int main(int argc, char *argv[])
 
     if (out != stdout)
         fclose(out);
-    free((void *)opts.inputs); // we free only the array (not the strings, they point into argv)
+    free((void *)opts.inputs); // only the array; entries point to argv
 
     return 0;
 }
