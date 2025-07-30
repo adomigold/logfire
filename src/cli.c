@@ -26,68 +26,159 @@ static OutputFormat parseFormatArg(const char *arg)
     return FORMAT_TEXT;
 }
 
-/**
- * @brief Parses command-line arguments and returns a CLIOptions struct.
- *
- * This function processes the command-line arguments provided to the program,
- * extracting options such as the log file path, search term, output format,
- * and output file. It supports the following arguments:
- *   --log <file>      : Specifies the log file to process (required).
- *   --search <term>   : Specifies a search term to filter log entries (optional).
- *   --format <type>   : Specifies the output format: text, json, or csv (optional, defaults to text).
- *   --output <file>   : Specifies a file to write the output to (optional).
- *   --help            : Displays usage information and exits.
- *
- * If an unknown argument is encountered or a required argument is missing,
- * the function prints an error message and exits the program.
- *
- * @param argc The number of command-line arguments.
- * @param argv The array of command-line argument strings.
- * @return CLIOptions struct populated with the parsed options.
- */
-CLIOptions parseCLI(int argc, char *argv[])
+// Append a path to opts->inputs, growing the array as needed
+static void add_input(CLIOptions *opts, const char *path, int *cap)
 {
-    CLIOptions opts = {
-        .logfile = NULL,
-        .searchTerm = NULL,
-        .format = FORMAT_TEXT,
-        .outputFile = NULL};
-
-    for (int i = 1; i < argc; i++)
+    if (opts->inputs == NULL)
     {
-        if (strcmp(argv[i], "--log") == 0 && i + 1 < argc)
+        *cap = 4;
+        opts->inputs = (const char **)malloc((*cap) * sizeof(char *));
+
+        if (!opts->inputs)
         {
-            opts.logfile = argv[++i];
-        }
-        else if (strcmp(argv[i], "--search") == 0 && i + 1 < argc)
-        {
-            opts.searchTerm = argv[++i];
-        }
-        else if (strcmp(argv[i], "--format") == 0 && i + 1 < argc)
-        {
-            opts.format = parseFormatArg(argv[++i]);
-        }
-        else if (strcmp(argv[i], "--output") == 0 && i + 1 < argc)
-        {
-            opts.outputFile = argv[++i];
-        }
-        else if (strcmp(argv[i], "--help") == 0)
-        {
-            printf("Usage: logfire --log <file> [--search <term>] [--format text|json|csv]\n");
-            exit(0);
-        }
-        else
-        {
-            printf("Unknown argument: %s\n", argv[i]);
+            perror("malloc");
             exit(1);
         }
     }
 
-    if (!opts.logfile)
+    // Check if we need to grow the array
+    if (opts->input_count >= *cap)
     {
-        fprintf(stderr, "Error: --log <file> is required.\n");
-        exit(1);
+        *cap *= 2;
+        const char **tmp = (const char **)realloc((void *)opts->inputs, (*cap) * sizeof(char *));
+        if (!tmp)
+        {
+            perror("realloc");
+            exit(1);
+        }
+        opts->inputs = tmp;
+    }
+    opts->inputs[opts->input_count++] = path;
+}
+
+static void print_usage(void)
+{
+    fprintf(stderr,
+            "Usage: logfire [--log FILE | --log -]... [--search TERM]\n"
+            "               [--format text|json|csv] [--output FILE]\n"
+            "               [--strict] [--ci] [--help]\n"
+            "\n"
+            "Examples:\n"
+            "  gunzip -c access.log.1.gz | logfire --log - --format json > out.json\n"
+            "  logfire --log access.log --log access.log.1 --search 500 --format csv\n");
+}
+
+/**
+ * @brief Parses command-line arguments and returns a CLIOptions struct.
+ *
+ * Processes command-line arguments for the logfire program, supporting:
+ *   --log <file>      : Add a log file to process (can be used multiple times, or use "-" for stdin).
+ *   --search <term>   : Filter log entries by a search term (optional).
+ *   --format <type>   : Output format: text, json, or csv (optional, defaults to text).
+ *   --output <file>   : Write output to a file (optional).
+ *   --strict          : Enable strict mode (optional).
+ *   --ci, --case-insensitive : Enable case-insensitive search (optional).
+ *   --help, -h        : Show usage information and exit.
+ *   --                : Treat all following arguments as input files.
+ *   <file>            : Bare arguments are treated as input files.
+ *
+ * If no input files are specified, stdin ("-") is used by default.
+ * On error or unknown argument, prints a message and exits.
+ *
+ * @param argc Number of command-line arguments.
+ * @param argv Array of command-line argument strings.
+ * @return CLIOptions struct with parsed options.
+ */
+CLIOptions parseCLI(int argc, char *argv[])
+{
+    CLIOptions opts = {
+        .inputs = NULL,
+        .searchTerm = NULL,
+        .input_count = 0,
+        .format = FORMAT_TEXT,
+        .outputFile = NULL,
+        .strict = 0,
+        .case_insensitive = 0,
+    };
+
+    int cap = 0;
+
+    for (int i = 1; i < argc; i++)
+    {
+        const char *a = argv[i];
+
+        if (strcmp(a, "--") == 0)
+        { // stop option parsing; rest are files
+            for (int j = i + 1; j < argc; j++)
+                add_input(&opts, argv[j], &cap);
+            break;
+        }
+        else if (strcmp(a, "--log") == 0)
+        {
+            if (i + 1 >= argc)
+            {
+                fprintf(stderr, "--log requires a path (or - for stdin)\n");
+                exit(1);
+            }
+            add_input(&opts, argv[++i], &cap);
+        }
+        else if (strcmp(a, "--search") == 0)
+        {
+            if (i + 1 >= argc)
+            {
+                fprintf(stderr, "--search requires a term\n");
+                exit(1);
+            }
+            opts.searchTerm = argv[++i];
+        }
+        else if (strcmp(a, "--format") == 0)
+        {
+            if (i + 1 >= argc)
+            {
+                fprintf(stderr, "--format requires text|json|csv\n");
+                exit(1);
+            }
+            opts.format = parseFormatArg(argv[++i]);
+        }
+        else if (strcmp(a, "--output") == 0)
+        {
+            if (i + 1 >= argc)
+            {
+                fprintf(stderr, "--output requires a filename\n");
+                exit(1);
+            }
+            opts.outputFile = argv[++i];
+        }
+        else if (strcmp(a, "--strict") == 0)
+        {
+            opts.strict = 1;
+        }
+        else if (strcmp(a, "--ci") == 0 || strcmp(a, "--case-insensitive") == 0)
+        {
+            opts.case_insensitive = 1;
+        }
+        else if (strcmp(a, "--help") == 0 || strcmp(a, "-h") == 0)
+        {
+            print_usage();
+            exit(0);
+        }
+        else if (a[0] != '-')
+        {
+            // treat bare argument as an input filename for convenience
+            add_input(&opts, a, &cap);
+        }
+        else
+        {
+            fprintf(stderr, "Unknown argument: %s\n\n", a);
+            print_usage();
+            exit(1);
+        }
     }
 
+    if (opts.input_count == 0)
+    {
+        print_usage();
+        exit(1);
+    }
     return opts;
 }

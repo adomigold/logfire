@@ -9,49 +9,45 @@
 #include "parser.h"
 
 /**
- * @brief Parses a log file in the common log format and processes each entry.
+ * @brief Parses a single log line in Apache or Nginx combined log format.
  *
- * This function opens the specified log file, reads it line by line, and attempts to parse
- * each line according to the common log format, extracting fields such as IP address,
- * timestamp, request, status code, size, referrer, and user agent. For each successfully
- * parsed line, it constructs a formatted message and calls the addLog function to process
- * the log entry.
+ * This function attempts to extract key fields from a log line, including IP address,
+ * timestamp, HTTP method, URL, protocol, status code, and User-Agent. The referrer
+ * field is ignored. The extracted values are stored in the provided LogEntry struct.
  *
- * @param filename The path to the log file to be parsed.
- *
- * @note Lines that do not match the expected format are skipped.
- * @note The function prints an error message to stderr if the file cannot be opened.
+ * @param line      The input log line as a null-terminated string.
+ * @param out       Pointer to a LogEntry struct to be filled with parsed data.
+ * @param errmsg    Buffer to receive an error message if parsing fails (can be NULL).
+ * @param errmsg_sz Size of the errmsg buffer.
+ * @return          1 if parsing was successful and required fields were found, 0 otherwise.
  */
-void parseLogFile(const char *filename)
+int parse_apache_or_nginx(const char *line, LogEntry *out, char *errmsg, size_t errmsg_sz)
 {
-    FILE *file = fopen(filename, "r");
-    if (!file)
-    {
-        fprintf(stderr, "Could not open file: %s\n", filename);
-        return;
+    memset(out, 0, sizeof(*out)); // Reset out
+
+    char ip[64] = {0}, timebuf[64] = {0}, method[16] = {0}, url[1024] = {0}, proto[32] = {0}, ua[1024] = {0}; // Example line: 83.149.9.216 - - [17/May/2015:10:05:03 +0000] "GET /path HTTP/1.1" 200 123 "-" "UA..."
+    int status = 0;
+
+    // NOTE: Some servers put the referrer in quotes before the User-Agent; the pattern above skips it with %*[^\" ].
+    // This parser will continue to ignore the referrer and only extract the User-Agent.
+    int matched = sscanf(line,
+                         "%63s - - [%63[^]]] \"%15s %1023s %31[^\"]\" %d %*s %*[^\" ] \"%1023[^\"]\"",
+                         ip, timebuf, method, url, proto, &status, ua); // we use scansets to grab inside [] and ""
+
+    if (matched < 6)
+
+    { // be lenient; require at least ip,time,method,url,proto,status
+        if (errmsg && errmsg_sz)
+            snprintf(errmsg, errmsg_sz, "sscanf matched %d fields", matched);
+        return 0;
     }
 
-    char line[MAX_LINE_LENGTH];
-    while (fgets(line, sizeof(line), file))
-    {
-        char ip[64], timestamp[128], request[512], status[8], size[16], referrer[256], user_agent[256];
+    strncpy(out->ip, ip, sizeof(out->ip) - 1);
+    strncpy(out->timestamp, timebuf, sizeof(out->timestamp) - 1);
+    strncpy(out->method, method, sizeof(out->method) - 1);
+    strncpy(out->url, url, sizeof(out->url) - 1);
+    out->status = status;
+    strncpy(out->userAgent, ua, sizeof(out->userAgent) - 1);
 
-        int matched = sscanf(line,
-                             "%63s - - [%127[^]]] \"%511[^\"]\" %7s %15s \"%255[^\"]\" \"%255[^\"]\"",
-                             ip, timestamp, request, status, size, referrer, user_agent); // Parse common log format with request and user agent
-        
-        if (matched == 7)
-        {
-            char message[1024];
-            snprintf(message, sizeof(message), "%s [%s] \"%s\" %s %s \"%s\"",
-                     ip, timestamp, request, status, size, user_agent);
-            addLog(timestamp, ip, request, message, atoi(status), user_agent);
-        }
-        else
-        {
-            continue; // Skip lines that do not match the expected format
-        }
-    }
-
-    fclose(file);
+    return 1;
 }
