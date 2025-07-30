@@ -35,7 +35,6 @@ int parse_apache_or_nginx(const char *line, LogEntry *out, char *errmsg, size_t 
                          ip, timebuf, method, url, proto, &status, ua); // we use scansets to grab inside [] and ""
 
     if (matched < 6)
-
     { // be lenient; require at least ip,time,method,url,proto,status
         if (errmsg && errmsg_sz)
             snprintf(errmsg, errmsg_sz, "sscanf matched %d fields", matched);
@@ -47,7 +46,7 @@ int parse_apache_or_nginx(const char *line, LogEntry *out, char *errmsg, size_t 
     strncpy(out->method, method, sizeof(out->method) - 1);
     strncpy(out->url, url, sizeof(out->url) - 1);
     out->status = status;
-    strncpy(out->userAgent, ua, sizeof(out->userAgent) - 1);
+    strncpy(out->userAgent, ua, sizeof(out->userAgent) - 1);  
 
     return 1;
 }

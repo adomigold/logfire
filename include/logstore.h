@@ -4,6 +4,7 @@
  */
 #ifndef LOGSTORE_H
 #define LOGSTORE_H
+#include <time.h>
 
 typedef struct
 {
@@ -13,6 +14,7 @@ typedef struct
     char url[1024];
     int status;
     char userAgent[1024];
+    time_t epoch;
 } LogEntry;
 
 #endif // LOGSTORE_H

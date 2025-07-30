@@ -11,11 +11,11 @@
  * @brief Parses a string argument to determine the output format.
  *
  * This function compares the input string argument with known format strings
- * ("json" and "csv") and returns the corresponding OutputFormat enum value.
- * If the argument does not match any known format, FORMAT_TEXT is returned as the default.
+ * ("json" and "csv") and returns the corresponding OutputFormat enumeration value.
+ * If the argument does not match any known format, FORMAT_TEXT is returned by default.
  *
  * @param arg The string argument representing the desired output format.
- * @return OutputFormat The corresponding output format enum value.
+ * @return OutputFormat The corresponding output format enumeration value.
  */
 static OutputFormat parseFormatArg(const char *arg)
 {
@@ -26,22 +26,29 @@ static OutputFormat parseFormatArg(const char *arg)
     return FORMAT_TEXT;
 }
 
-// Append a path to opts->inputs, growing the array as needed
+/**
+ * @brief Adds an input path to the CLIOptions structure, dynamically resizing the inputs array as needed.
+ *
+ * This function manages the dynamic allocation and resizing of the inputs array within the CLIOptions structure.
+ * If the array is uninitialized, it allocates an initial capacity. If the array is full, it doubles its capacity.
+ * The provided path is then added to the array.
+ *
+ * @param opts Pointer to the CLIOptions structure where the input path will be added.
+ * @param path The input path to add to the options.
+ * @param cap Pointer to an integer representing the current capacity of the inputs array. This value may be updated if the array is resized.
+ */
 static void add_input(CLIOptions *opts, const char *path, int *cap)
 {
     if (opts->inputs == NULL)
     {
         *cap = 4;
         opts->inputs = (const char **)malloc((*cap) * sizeof(char *));
-
         if (!opts->inputs)
         {
             perror("malloc");
             exit(1);
         }
     }
-
-    // Check if we need to grow the array
     if (opts->input_count >= *cap)
     {
         *cap *= 2;
@@ -59,46 +66,48 @@ static void add_input(CLIOptions *opts, const char *path, int *cap)
 static void print_usage(void)
 {
     fprintf(stderr,
-            "Usage: logfire [--log FILE | --log -]... [--search TERM]\n"
+            "Usage: logfire [--log FILE | --log -]... [--search TERM] [--query EXPR]\n"
             "               [--format text|json|csv] [--output FILE]\n"
-            "               [--strict] [--ci] [--help]\n"
+            "               [--strict] [--ci] [--tail|-f] [--from-start]\n"
+            "               [--help]\n"
             "\n"
             "Examples:\n"
             "  gunzip -c access.log.1.gz | logfire --log - --format json > out.json\n"
-            "  logfire --log access.log --log access.log.1 --search 500 --format csv\n");
+            "  logfire --log access.log --log access.log.1 --query \"status>=500 ip:10.*\" --format csv\n"
+            "  logfire --log access.log --tail -f --query \"method:POST url:*login*\" --format json\n");
 }
 
 /**
- * @brief Parses command-line arguments and returns a CLIOptions struct.
+ * @brief Parse command-line arguments into CLIOptions.
  *
- * Processes command-line arguments for the logfire program, supporting:
- *   --log <file>      : Add a log file to process (can be used multiple times, or use "-" for stdin).
- *   --search <term>   : Filter log entries by a search term (optional).
- *   --format <type>   : Output format: text, json, or csv (optional, defaults to text).
- *   --output <file>   : Write output to a file (optional).
- *   --strict          : Enable strict mode (optional).
- *   --ci, --case-insensitive : Enable case-insensitive search (optional).
- *   --help, -h        : Show usage information and exit.
- *   --                : Treat all following arguments as input files.
- *   <file>            : Bare arguments are treated as input files.
+ * Supports:
+ *   --log <file>      : Add input (multiple allowed). Use '-' for stdin.
+ *   --search <term>   : Keyword search (simple contains across fields).
+ *   --query  <expr>   : Field-based query (status, ip, method, url, timestamp, etc.).
+ *   --format <type>   : text | json | csv (default: text).
+ *   --output <file>   : Write to file (otherwise stdout).
+ *   --strict          : Warn/print malformed lines to stderr.
+ *   --ci              : Case-insensitive matching.
+ *   --tail, -f        : Follow file (tail -f). Use with a single --log file.
+ *   --from-start      : With --tail, start at beginning (default: end).
+ *   --help, -h        : Show usage.
+ *   --                : Treat remaining args as filenames.
  *
- * If no input files are specified, stdin ("-") is used by default.
- * On error or unknown argument, prints a message and exits.
- *
- * @param argc Number of command-line arguments.
- * @param argv Array of command-line argument strings.
- * @return CLIOptions struct with parsed options.
+ * If no inputs are given, defaults to reading from stdin ("-").
  */
 CLIOptions parseCLI(int argc, char *argv[])
 {
     CLIOptions opts = {
         .inputs = NULL,
-        .searchTerm = NULL,
         .input_count = 0,
+        .searchTerm = NULL,
+        .query = NULL,
         .format = FORMAT_TEXT,
         .outputFile = NULL,
         .strict = 0,
         .case_insensitive = 0,
+        .tail = 0,
+        .from_start = 0,
     };
 
     int cap = 0;
@@ -108,7 +117,7 @@ CLIOptions parseCLI(int argc, char *argv[])
         const char *a = argv[i];
 
         if (strcmp(a, "--") == 0)
-        { // stop option parsing; rest are files
+        {
             for (int j = i + 1; j < argc; j++)
                 add_input(&opts, argv[j], &cap);
             break;
@@ -130,6 +139,15 @@ CLIOptions parseCLI(int argc, char *argv[])
                 exit(1);
             }
             opts.searchTerm = argv[++i];
+        }
+        else if (strcmp(a, "--query") == 0)
+        {
+            if (i + 1 >= argc)
+            {
+                fprintf(stderr, "--query requires an expression\n");
+                exit(1);
+            }
+            opts.query = argv[++i];
         }
         else if (strcmp(a, "--format") == 0)
         {
@@ -157,6 +175,14 @@ CLIOptions parseCLI(int argc, char *argv[])
         {
             opts.case_insensitive = 1;
         }
+        else if (strcmp(a, "--tail") == 0 || strcmp(a, "-f") == 0)
+        {
+            opts.tail = 1;
+        }
+        else if (strcmp(a, "--from-start") == 0)
+        {
+            opts.from_start = 1;
+        }
         else if (strcmp(a, "--help") == 0 || strcmp(a, "-h") == 0)
         {
             print_usage();
@@ -164,7 +190,7 @@ CLIOptions parseCLI(int argc, char *argv[])
         }
         else if (a[0] != '-')
         {
-            // treat bare argument as an input filename for convenience
+            // bare path -> input filename
             add_input(&opts, a, &cap);
         }
         else
@@ -175,10 +201,18 @@ CLIOptions parseCLI(int argc, char *argv[])
         }
     }
 
+    // Default to stdin if no inputs were provided
     if (opts.input_count == 0)
     {
         print_usage();
         exit(1);
     }
+
+    // If both --search and --query are provided, prefer --query but warn
+    if (opts.searchTerm && opts.query)
+    {
+        fprintf(stderr, "[warn] Both --search and --query provided. Using --query and ignoring --search.\n");
+    }
+
     return opts;
 }
