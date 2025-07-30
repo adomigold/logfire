@@ -5,6 +5,9 @@
 #ifndef PARSER_H
 #define PARSER_H
 
-void parseLogFile(const char *filename);
+#include "logstore.h"
+
+char *read_line_dyn(FILE *fp);
+int parse_apache_or_nginx(const char *line, LogEntry *out, char *errmsg, size_t errmsg_sz);
 
 #endif // PARSER_H

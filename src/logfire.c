@@ -4,97 +4,144 @@
  */
 #include <stdio.h>
 #include <string.h>
-#include "logfire.h"
-
-LogEntry logEntries[MAX_LOGS];
-int logCount = 0;
-
-/**
- * @brief Adds a new log entry to the logEntries array.
- *
- * This function copies the provided log details (timestamp, IP address, HTTP method,
- * URL, status code, and user agent) into the next available slot in the logEntries array,
- * provided the maximum number of logs (MAX_LOGS) has not been reached. Each string field
- * is safely copied with null-termination to prevent buffer overflows.
- *
- * @param timestamp   The timestamp of the log entry.
- * @param ip          The IP address associated with the log entry.
- * @param method      The HTTP method used in the request.
- * @param url         The URL requested.
- * @param status      The HTTP status code returned.
- * @param userAgent   The user agent string from the request.
- *
- * @note If the logEntries array is full, an error message is printed to stderr and
- *       the log entry is not added.
- */
-void addLog(const char *timestamp, const char *ip, const char *method,
-            const char *url, int status, const char *userAgent)
-{
-    if (logCount < MAX_LOGS)
-    {
-        strncpy(logEntries[logCount].timestamp, timestamp, sizeof(logEntries[logCount].timestamp) - 1);
-        logEntries[logCount].timestamp[sizeof(logEntries[logCount].timestamp) - 1] = '\0'; // Ensure null-termination
-
-        strncpy(logEntries[logCount].ip, ip, sizeof(logEntries[logCount].ip) - 1);
-        logEntries[logCount].ip[sizeof(logEntries[logCount].ip) - 1] = '\0'; // Ensure null-termination
-
-        strncpy(logEntries[logCount].method, method, sizeof(logEntries[logCount].method) - 1);
-        logEntries[logCount].method[sizeof(logEntries[logCount].method) - 1] = '\0'; // Ensure null-termination
-
-        strncpy(logEntries[logCount].url, url, sizeof(logEntries[logCount].url) - 1);
-        logEntries[logCount].url[sizeof(logEntries[logCount].url) - 1] = '\0'; // Ensure null-termination
-
-        logEntries[logCount].status = status;
-
-        strncpy(logEntries[logCount].userAgent, userAgent, sizeof(logEntries[logCount].userAgent) - 1);
-        logEntries[logCount].userAgent[sizeof(logEntries[logCount].userAgent) - 1] = '\0'; // Ensure null-termination
-
-        logCount++;
-    }
-    else
-    {
-        fprintf(stderr, "Log limit reached. Cannot add more logs.\n");
-    }
-}
+#include <stdlib.h>
+#include "cli.h"
+#include "parser.h"
+#include "query.h"
+#include "formatter.h"
+#include "jsonout.h"
 
 /**
- * @brief Searches through the log entries for a given keyword and prints matching logs.
+ * read_line_dyn - Reads a line of arbitrary length from the given file pointer.
  *
- * This function iterates over all available log entries and checks if the specified keyword
- * is present in any of the following fields: method, URL, user agent, timestamp, or IP address.
- * If a match is found, the log entry is printed using the specified output format.
- * If no matches are found, a message is printed indicating that no logs matched the keyword.
+ * This function dynamically allocates and resizes a buffer to read a line
+ * from the specified file stream `fp`. It reads characters until a newline
+ * character or EOF is encountered. The newline character, if present, is
+ * replaced with a null terminator. The returned buffer must be freed by the caller.
  *
- * @param keyword The keyword to search for within the log entries.
- * @param currentFormat The output format to use when printing matching log entries.
+ * @param fp: Pointer to a FILE object to read from.
+ *
+ * @return Pointer to a dynamically allocated null-terminated string containing
+ *         the line read (without the newline character), or NULL on EOF or error.
  */
-void searchLogs(const char *keyword, enum OutputFormat currentFormat, FILE *out)
+char *read_line_dyn(FILE *fp)
 {
-    int found = 0;
+    size_t cap = 4096, len = 0;
+    char *buf = (char *)malloc(cap);
+    if (!buf)
+        return NULL;
 
-    if (currentFormat == JSON)
-        fprintf(out, "[\n");
-
-    for (int i = 0; i < logCount; i++)
+    for (;;)
     {
-        if (strstr(logEntries[i].method, keyword) != NULL ||
-            strstr(logEntries[i].url, keyword) != NULL ||
-            strstr(logEntries[i].userAgent, keyword) != NULL ||
-            strstr(logEntries[i].timestamp, keyword) != NULL ||
-            strstr(logEntries[i].ip, keyword) != NULL)
+        if (fgets(buf + len, (int)(cap - len), fp) == NULL)
         {
-            if (currentFormat == JSON && found > 0)
-                fprintf(out, ",\n");
-
-            printFormatted(&logEntries[i], currentFormat, out);
-            found++;
+            if (len == 0)
+            {
+                free(buf);
+                return NULL;
+            }
+            break;
+        }
+        len += strlen(buf + len);
+        if (len && buf[len - 1] == '\n')
+        {
+            buf[len - 1] = '\0';
+            break;
+        }
+        if (cap - len < 2)
+        {
+            cap *= 2;
+            char *nbuf = (char *)realloc(buf, cap);
+            if (!nbuf)
+            {
+                free(buf);
+                return NULL;
+            }
+            buf = nbuf;
         }
     }
-
-    if (currentFormat == JSON)
-        fprintf(out, "\n]\n");
-
-    if (found == 0)
-        fprintf(stderr, "No logs found matching \"%s\".\n", keyword);
+    return buf;
 }
 
+/**
+ * @brief Processes a stream of log lines, parses them, and outputs in the specified format.
+ *
+ * Reads lines from the input stream, attempts to parse each as an Apache or Nginx log entry,
+ * and writes the output in JSON, CSV, or plain text format to the output stream. Optionally
+ * filters entries by a search term and supports case-insensitive matching. Handles parse
+ * failures according to the strictness option and prints a summary to stderr.
+ *
+ * @param in        Input file stream to read log lines from.
+ * @param label     Optional label for the input source, used in warnings and summary.
+ * @param opt       Pointer to CLIOptions struct specifying output format, search term, and options.
+ * @param out       Output file stream to write formatted log entries.
+ */
+void process_stream(FILE *in, const char *label, const CLIOptions *opt, FILE *out)
+{
+    long long total = 0, parsed = 0, failed = 0;
+    int opened_json = 0, first_json = 1;
+
+    if (opt->format == FORMAT_JSON)
+    {
+        fprintf(out, "[");
+        opened_json = 1;
+    }
+
+    for (;;)
+    {
+        char *line = read_line_dyn(in);
+        if (!line)
+            break;
+        total++;
+
+        LogEntry e;
+        char perr[256] = {0};
+
+        if (parse_apache_or_nginx(line, &e, perr, sizeof(perr)))
+        {
+            int ok = (!opt->searchTerm || !*opt->searchTerm) ? 1
+                                                             : matches(&e, opt->searchTerm, opt->case_insensitive);
+
+            if (ok)
+            {
+                if (opt->format == FORMAT_JSON)
+                {
+                    if (!first_json)
+                        fprintf(out, ",");
+
+                    printLogJSON(&e, out);
+                    first_json = 0;
+                }
+                else if (opt->format == FORMAT_CSV)
+                {
+                    printLogCSV(&e, out);
+                    fputc('\n', out);
+                }
+                else
+                {
+                    printLogText(&e, out);
+                    fputc('\n', out);
+                }
+            }
+            parsed++;
+        }
+        else
+        {
+            failed++;
+            if (opt->strict)
+            {
+                fprintf(stderr, "[warn] parse failed (%s): %s\n", label ? label : "-", perr[0] ? perr : "unknown");
+                fprintf(stderr, "  >> %s\n", line);
+            }
+        }
+
+        free(line);
+    }
+
+    if (opened_json)
+        fprintf(out, "]\n");
+
+    // Summary to stderr keeps stdout clean for pipes/redirection
+    fprintf(stderr, "[%s] total=%lld parsed=%lld failed=%lld\n",
+            label ? label : "-", total, parsed, failed);
+}

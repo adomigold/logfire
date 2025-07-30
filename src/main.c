@@ -4,6 +4,7 @@
  */
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include "logfire.h"
 #include "parser.h"
 #include "formatter.h"
@@ -11,48 +12,45 @@
 
 FILE *out = NULL;
 
-void parseLogFile(const char *filename);
-void printFormatted(LogEntry *entry, enum OutputFormat fmt, FILE *out);
-
 int main(int argc, char *argv[])
 {
-    CLIOptions options = parseCLI(argc, argv);
+    CLIOptions opts = parseCLI(argc, argv);
 
     FILE *out = stdout;
-    if (options.outputFile)
+    if (opts.outputFile)
     {
-        out = fopen(options.outputFile, "w");
+        out = fopen(opts.outputFile, "w");
         if (!out)
         {
-            perror("Failed to open output file");
+            perror("open output");
             return 1;
         }
     }
 
-    parseLogFile(options.logfile);
-    searchLogs(options.searchTerm, options.format, out);
+    // No inputs? parseCLI already added "-" (stdin)
+    for (int i = 0; i < opts.input_count; i++)
+    {
+        const char *path = opts.inputs[i];
+        if (strcmp(path, "-") == 0)
+        {
+            process_stream(stdin, "-", &opts, out);
+        }
+        else
+        {
+            FILE *fp = fopen(path, "rb");
+            if (!fp)
+            {
+                perror(path);
+                continue;
+            }
+            process_stream(fp, path, &opts, out);
+            fclose(fp);
+        }
+    }
 
     if (out != stdout)
-    {
         fclose(out);
-    }
+    free((void *)opts.inputs); // we free only the array (not the strings, they point into argv)
 
     return 0;
 }
-
-void printFormatted(LogEntry *entry, enum OutputFormat fmt, FILE *out)
-{
-    switch (fmt)
-    {
-    case JSON:
-        printLogJSON(entry, out);
-        break;
-    case CSV:
-        printLogCSV(entry, out);
-        break;
-    default:
-        printLogText(entry, out);
-        break;
-    }
-}
-

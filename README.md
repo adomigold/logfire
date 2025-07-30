@@ -1,6 +1,6 @@
-````markdown
 # 🔥 Logfire
 
+````markdown
 **Logfire** is a lightweight, blazing-fast command-line log processor built in C. It allows you to parse, search, and format logs (such as Apache and Nginx access logs) into readable or structured formats like JSON and CSV — all without the bloat of heavy tools like ELK.
 
 ---
@@ -17,22 +17,14 @@
 - 🧩 Easy to embed into other C tools or scripts
 - ⚡️ Extremely fast and portable
 
----
-
+````
 ## 🛠️ Build
 
 You need a C compiler like `gcc`.
 
 ```bash
-gcc -o logfire src/logfire.c
+make
 ````
-
-If using multiple source files:
-
-```bash
-gcc -o logfire src/logfire.c src/parser.c src/cli.c -Wall
-```
-
 ---
 
 ## 📦 Usage
